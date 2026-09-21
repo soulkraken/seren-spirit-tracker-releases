@@ -1,0 +1,30 @@
+# Personal tracker data and machine-specific settings
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*_rewards.csv
+*_legacy_backup_*.csv
+tracker_settings.json
+
+# OCR/debug output
+latest_ocr_debug_capture.png
+*.log
+
+# Python and PyInstaller output
+__pycache__/
+*.py[cod]
+build/
+dist/
+release_staging/
+*.spec
+
+# Locally packaged archives and temporary repository inspection
+Seren Spirit Tracker.zip
+.github-repo-inspect/
+
+# Editor and operating-system clutter
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,32 @@
+Seren Spirit Tracker includes or uses the following third-party software:
+
+Tesseract OCR
+Copyright 2006 Google Inc. and other contributors
+Licensed under the Apache License 2.0.
+The bundled Tesseract license is also included under
+app\runtime\Tesseract-OCR\doc\LICENSE.
+https://github.com/tesseract-ocr/tesseract
+
+PyInstaller
+GPL-2.0-or-later with a special exception permitting distribution of
+bundled applications.
+https://pyinstaller.org/
+
+Python MSS
+Copyright 2013-2025 Mickael Schoentgen
+Licensed under the MIT License.
+https://github.com/BoboTiG/python-mss
+
+Pillow
+Licensed under the MIT-CMU license.
+https://python-pillow.org/
+
+pytesseract
+Copyright Samuel Hoffstaetter
+Licensed under the Apache License 2.0.
+https://github.com/madmaze/pytesseract
+
+The RuneScape artwork used for the application icon was obtained from the
+RuneScape Wiki file page for "Seren spirit.png". RuneScape and its artwork
+are trademarks/copyrights of Jagex Ltd.; this personal tracker is not
+affiliated with or endorsed by Jagex.
