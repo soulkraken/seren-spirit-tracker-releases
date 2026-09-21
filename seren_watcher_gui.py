@@ -265,9 +265,20 @@ LOOSE_REWARD_RE = re.compile(
     re.IGNORECASE
 )
 
+CATALYST_DIFFICULTIES = ("easy", "medium", "hard", "elite", "master")
+CATALYST_DIFFICULTY_ORDER = {
+    difficulty: index
+    for index, difficulty in enumerate(CATALYST_DIFFICULTIES)
+}
+CATALYST_ITEM_RE = re.compile(
+    r"(?P<name>.+?)\s*\(\s*"
+    r"(?P<difficulty>easy|medium|hard|elite|master)\s*\)",
+    re.IGNORECASE
+)
 CATALYST_RE = re.compile(
     r"the\W*catalyst\W*of\W*alteration\W*contained\W*"
-    r"(\d+)\s*[xX×*]\s*(.+?)\s*[.¥]*$",
+    r"(\d+)\s*[xX×*]\s*"
+    r"(.+?\(\s*(?:easy|medium|hard|elite|master)\s*\))",
     re.IGNORECASE
 )
 
@@ -354,13 +365,40 @@ def is_catalyst_message(message):
     ) is not None
 
 
+def clean_catalyst_item(item):
+    """Return only the item text through its recognised difficulty suffix."""
+    normalized = " ".join(str(item).split()).strip()
+    match = CATALYST_ITEM_RE.search(normalized)
+    if not match:
+        return None
+
+    name = match.group("name").strip(" .:;|»¥")
+    difficulty = match.group("difficulty").lower()
+    if not name:
+        return None
+    return f"{name} ({difficulty})"
+
+
+def catalyst_item_sort_key(item):
+    match = re.search(
+        r"\((easy|medium|hard|elite|master)\)$",
+        item,
+        re.IGNORECASE
+    )
+    difficulty = match.group(1).lower() if match else ""
+    return (
+        CATALYST_DIFFICULTY_ORDER.get(difficulty, len(CATALYST_DIFFICULTIES)),
+        item.casefold(),
+    )
+
+
 def parse_catalyst_message(message):
     match = CATALYST_RE.search(message)
     if not match:
         return None
 
     quantity = int(match.group(1))
-    item = " ".join(match.group(2).strip().split()).strip(" .¥")
+    item = clean_catalyst_item(match.group(2))
     if quantity <= 0 or not item:
         return None
     return quantity, item
@@ -566,7 +604,7 @@ def read_catalyst_csv_mirror_rows():
             try:
                 timestamp = int(row["t"])
                 quantity = int(row["q"])
-                item = row["item"].strip()
+                item = clean_catalyst_item(row["item"])
                 if quantity > 0 and item:
                     rows.append((timestamp, quantity, item))
             except (KeyError, TypeError, ValueError):
@@ -675,6 +713,19 @@ def initialize_database():
                 """,
                 catalyst_csv_rows
             )
+
+        # Older OCR captures sometimes included the following chat messages in
+        # the stored item name. Keep only the text through the known difficulty
+        # suffix and persist the repair to both SQLite and the CSV mirror.
+        for drop_id, stored_item in connection.execute(
+            "SELECT id, item FROM catalyst_drops"
+        ).fetchall():
+            cleaned_item = clean_catalyst_item(stored_item)
+            if cleaned_item and cleaned_item != stored_item:
+                connection.execute(
+                    "UPDATE catalyst_drops SET item = ? WHERE id = ?",
+                    (cleaned_item, drop_id)
+                )
 
     sync_csv_mirror_from_database()
     sync_catalyst_csv_mirror_from_database()
@@ -788,7 +839,9 @@ def read_csv_rows():
 def log_catalyst_drop(script_timestamp, quantity, item):
     timestamp = int(script_timestamp)
     quantity = int(quantity)
-    item = " ".join(item.split()).strip()
+    item = clean_catalyst_item(item)
+    if quantity <= 0 or not item:
+        raise ValueError("Catalyst drop does not contain a valid item and difficulty")
 
     if not DB_PATH.exists():
         initialize_database()
@@ -2054,16 +2107,23 @@ class SerenWatcherGUI:
                     "item": item,
                     "quantity": 0,
                     "count": 0,
+                    "min": row["quantity"],
+                    "max": row["quantity"],
                 }
             stats[key]["quantity"] += row["quantity"]
             stats[key]["count"] += 1
+            stats[key]["min"] = min(stats[key]["min"], row["quantity"])
+            stats[key]["max"] = max(stats[key]["max"], row["quantity"])
 
         quantity_width = max(
             (len(str(entry["quantity"])) for entry in stats.values()),
             default=1
         )
         for row_index, entry in enumerate(
-            sorted(stats.values(), key=lambda value: value["item"].lower())
+            sorted(
+                stats.values(),
+                key=lambda value: catalyst_item_sort_key(value["item"])
+            )
         ):
             aligned_quantity = str(entry["quantity"]).rjust(
                 quantity_width, "\u2007"
@@ -2090,12 +2150,19 @@ class SerenWatcherGUI:
         for row_index, entry in enumerate(rate_rows):
             count = entry["count"]
             aligned_count = str(count).rjust(count_width, "\u2007")
+            min_quantity = entry["min"]
+            max_quantity = entry["max"]
+            quantity_range = (
+                str(min_quantity)
+                if min_quantity == max_quantity
+                else f"{min_quantity}-{max_quantity}"
+            )
             rate = (count / total_events * 100) if total_events else 0
             self.catalyst_rate_table.insert(
                 "",
                 "end",
                 values=(
-                    f"{aligned_count} x {entry['item']}",
+                    f"{aligned_count} x {quantity_range} {entry['item']}",
                     f"{rate:.2f}% ({count}/{total_events})",
                 ),
                 tags=("even" if row_index % 2 == 0 else "odd",)
