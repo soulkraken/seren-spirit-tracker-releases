@@ -70,9 +70,45 @@ def request_bytes(url, timeout=15):
         return response.read()
 
 
-def fetch_latest_release(repository):
-    url = f"https://api.github.com/repos/{repository}/releases/latest"
-    return json.loads(request_bytes(url).decode("utf-8"))
+def fetch_releases(repository):
+    """Fetch published releases, including intermediate versions for notes."""
+    releases = []
+    page = 1
+    while True:
+        url = (
+            f"https://api.github.com/repos/{repository}/releases"
+            f"?per_page=100&page={page}"
+        )
+        batch = json.loads(request_bytes(url).decode("utf-8"))
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub returned an unexpected releases response.")
+        releases.extend(batch)
+        if len(batch) < 100:
+            return releases
+        page += 1
+
+
+def newer_stable_releases(releases, installed_version):
+    newer = []
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        release_version = version_tuple(release.get("tag_name", ""))
+        if release_version is not None and release_version > installed_version:
+            newer.append((release_version, release))
+    newer.sort(key=lambda entry: entry[0])
+    return newer
+
+
+def format_release_notes(versioned_releases):
+    sections = []
+    for release_version, release in versioned_releases:
+        version_label = ".".join(str(part) for part in release_version)
+        notes = str(
+            release.get("body") or "No release notes were provided."
+        ).strip()
+        sections.append(f"{version_label}:\n{notes}")
+    return "\n\n".join(sections)
 
 
 def find_asset(release, predicate):
@@ -198,21 +234,22 @@ def check_for_update():
 
     # A failed check is intentionally silent so offline launches stay quick.
     try:
-        release = fetch_latest_release(repository)
-        latest_version = version_tuple(release.get("tag_name", ""))
+        releases = fetch_releases(repository)
+        available_releases = newer_stable_releases(releases, installed_version)
     except Exception:
         return
 
-    if latest_version is None or latest_version <= installed_version:
+    if not available_releases:
         return
 
-    release_name = release.get("name") or release.get("tag_name")
-    notes = str(release.get("body") or "No release notes were provided.").strip()
-    if len(notes) > 1200:
-        notes = notes[:1197] + "..."
+    latest_version, release = available_releases[-1]
+    latest_label = ".".join(str(part) for part in latest_version)
+    installed_label = ".".join(str(part) for part in installed_version)
+    notes = format_release_notes(available_releases)
 
     answer = message_box(
-        f"{release_name} is available.\n\n{notes}\n\n"
+        f"Version {latest_label} is available. You have {installed_label}.\n\n"
+        f"What's new:\n\n{notes}\n\n"
         "Would you like to download and install it now?",
         "Seren Spirit Tracker Update Available",
         MB_YESNO | MB_ICONINFORMATION,
