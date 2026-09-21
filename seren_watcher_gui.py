@@ -1793,7 +1793,9 @@ class SerenWatcherGUI:
         left_var = tk.StringVar(value=str(REGION_LEFT_OFFSET))
         width_var = tk.StringVar(value=str(REGION_WIDTH))
         height_var = tk.StringVar(value=str(REGION_HEIGHT))
-        bottom_var = tk.StringVar(value=str(REGION_BOTTOM_OFFSET))
+        bottom_var = tk.StringVar(
+            value=str(max(0, REGION_BOTTOM_OFFSET - REGION_HEIGHT))
+        )
         interval_var = tk.StringVar(value=str(CHECK_EVERY_SECONDS))
 
         ttk.Label(form, text="Monitor").grid(row=0, column=0, sticky="w", pady=3)
@@ -1806,10 +1808,10 @@ class SerenWatcherGUI:
         monitor_box.grid(row=0, column=1, columnspan=3, sticky="ew", padx=(10, 0), pady=3)
 
         fields = (
-            ("Left offset", left_var, "pixels from the monitor's left edge"),
             ("Width", width_var, "capture width in pixels"),
             ("Height", height_var, "capture height in pixels"),
-            ("Bottom offset", bottom_var, "distance from monitor bottom to capture top"),
+            ("Left offset", left_var, "pixels from the monitor's left edge"),
+            ("Bottom offset", bottom_var, "pixels from the monitor's bottom edge"),
             ("Check interval", interval_var, "seconds between OCR checks"),
         )
         for row, (label, variable, hint) in enumerate(fields, start=1):
@@ -1832,12 +1834,14 @@ class SerenWatcherGUI:
 
         def read_form():
             try:
+                region_height = int(height_var.get())
+                bottom_edge_offset = int(bottom_var.get())
                 settings = {
                     "monitor_number": monitor_options[monitor_var.get()],
                     "region_left_offset": int(left_var.get()),
                     "region_width": int(width_var.get()),
-                    "region_height": int(height_var.get()),
-                    "region_bottom_offset": int(bottom_var.get()),
+                    "region_height": region_height,
+                    "region_bottom_offset": region_height + bottom_edge_offset,
                     "check_every_seconds": float(interval_var.get()),
                 }
             except (KeyError, ValueError):
@@ -1850,16 +1854,13 @@ class SerenWatcherGUI:
                 raise ValueError("Width and height must be greater than zero.")
             if settings["check_every_seconds"] < 0.1:
                 raise ValueError("Check interval must be at least 0.1 seconds.")
+            if bottom_edge_offset < 0:
+                raise ValueError("Bottom offset cannot be negative.")
             if settings["region_left_offset"] + settings["region_width"] > monitor["width"]:
                 raise ValueError("The capture extends past the monitor's right edge.")
-            if not (
-                settings["region_height"]
-                <= settings["region_bottom_offset"]
-                <= monitor["height"]
-            ):
+            if settings["region_bottom_offset"] > monitor["height"]:
                 raise ValueError(
-                    "Bottom offset must be at least the capture height and no greater "
-                    "than the monitor height."
+                    "Height plus bottom offset cannot exceed the monitor height."
                 )
             return settings
 
