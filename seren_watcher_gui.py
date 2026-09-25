@@ -367,7 +367,7 @@ def is_catalyst_message(message):
 
 def is_birds_nest_message(message):
     return re.search(
-        r"^\[\d{2}:\d{2}:\d{2}\]\W*you\W*found\W*a\W*"
+        r"^\[\d{2}:\d{2}:\d{2}\]\W*you\W*find\W*a\W*"
         r"bird\W*s\W*nest\b",
         message,
         re.IGNORECASE
@@ -2211,7 +2211,7 @@ class SerenWatcherGUI:
         )
         rate_rows = sorted(
             stats.values(),
-            key=lambda value: (value["count"], value["item"].lower())
+            key=lambda value: catalyst_item_sort_key(value["item"])
         )
         for row_index, entry in enumerate(rate_rows):
             count = entry["count"]
