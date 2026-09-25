@@ -365,6 +365,15 @@ def is_catalyst_message(message):
     ) is not None
 
 
+def is_birds_nest_message(message):
+    return re.search(
+        r"^\[\d{2}:\d{2}:\d{2}\]\W*you\W*found\W*a\W*"
+        r"bird\W*s\W*nest\b",
+        message,
+        re.IGNORECASE
+    ) is not None
+
+
 def clean_catalyst_item(item):
     """Return only the item text through its recognised difficulty suffix."""
     normalized = " ".join(str(item).split()).strip()
@@ -676,6 +685,14 @@ def initialize_database():
             "CREATE INDEX IF NOT EXISTS idx_catalyst_drops_timestamp "
             "ON catalyst_drops(timestamp)"
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS misc_counters (
+                name TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0 CHECK (count >= 0)
+            )
+            """
+        )
 
         stored_rewards = dict(
             connection.execute("SELECT id, name FROM rewards").fetchall()
@@ -879,6 +896,37 @@ def read_catalyst_rows():
     return rows
 
 
+def increment_misc_counter(name):
+    if not DB_PATH.exists():
+        initialize_database()
+
+    with database_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO misc_counters (name, count)
+            VALUES (?, 1)
+            ON CONFLICT(name) DO UPDATE SET count = count + 1
+            """,
+            (name,)
+        )
+        return connection.execute(
+            "SELECT count FROM misc_counters WHERE name = ?",
+            (name,)
+        ).fetchone()[0]
+
+
+def read_misc_counter(name):
+    if not DB_PATH.exists():
+        initialize_database()
+
+    with database_connection() as connection:
+        row = connection.execute(
+            "SELECT count FROM misc_counters WHERE name = ?",
+            (name,)
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def get_summary_keys(raw_reward, quantity):
     """
     Returns two names:
@@ -977,6 +1025,7 @@ class SerenWatcherGUI:
 
         self.recent_valid_timestamps = deque(maxlen=6)
         self.recent_catalyst_timestamps = deque(maxlen=6)
+        self.recent_misc_timestamps = deque(maxlen=6)
         self.pending_review_keys = set()
         self.review_windows = {}
 
@@ -1169,8 +1218,10 @@ class SerenWatcherGUI:
 
         self.seren_tab = ttk.Frame(self.notebook, padding=(6, 8, 6, 6))
         self.catalyst_tab = ttk.Frame(self.notebook, padding=(6, 8, 6, 6))
+        self.misc_tab = ttk.Frame(self.notebook, padding=(6, 8, 6, 6))
         self.notebook.add(self.seren_tab, text="Seren Spirits")
         self.notebook.add(self.catalyst_tab, text="Catalysts")
+        self.notebook.add(self.misc_tab, text="Misc.")
 
         body = ttk.Frame(self.seren_tab)
         body.pack(fill="both", expand=True)
@@ -1193,6 +1244,7 @@ class SerenWatcherGUI:
         self.build_summary_panel()
 
         self.build_catalyst_tab()
+        self.build_misc_tab()
 
         self.create_resize_grips()
 
@@ -1729,6 +1781,18 @@ class SerenWatcherGUI:
             style="Panel.TLabel"
         ).pack(anchor="w", pady=1)
 
+    def build_misc_tab(self):
+        counters = ttk.LabelFrame(self.misc_tab, text="Counters", padding=12)
+        counters.pack(fill="x")
+
+        self.birds_nests_var = tk.StringVar(value="Bird's Nests Found: 0")
+        ttk.Label(
+            counters,
+            textvariable=self.birds_nests_var,
+            style="Panel.TLabel",
+            font=("Segoe UI", 12, "bold")
+        ).pack(anchor="w")
+
     # ===== Capture setup =====
 
     def show_setup_dialog(self, required=False):
@@ -2079,6 +2143,7 @@ class SerenWatcherGUI:
             )
 
         catalyst_count = self.reload_catalyst_tables()
+        self.reload_misc_tab()
         self.status_var.set(
             f"Loaded {len(rows)} Seren drops and {catalyst_count} catalyst drops"
         )
@@ -2170,6 +2235,10 @@ class SerenWatcherGUI:
             )
 
         return total_events
+
+    def reload_misc_tab(self):
+        birds_nests = read_misc_counter("birds_nests")
+        self.birds_nests_var.set(f"Bird's Nests Found: {birds_nests}")
 
     # ===== GE prices =====
 
@@ -2268,6 +2337,22 @@ class SerenWatcherGUI:
 
         for message in messages:
             normalized = normalize_message(message)
+
+            if is_birds_nest_message(normalized):
+                message_timestamp = get_message_timestamp(normalized)
+                if message_timestamp in self.recent_misc_timestamps:
+                    continue
+
+                if message_timestamp:
+                    self.recent_misc_timestamps.append(message_timestamp)
+
+                count = increment_misc_counter("birds_nests")
+                console_log(f"MISC: Bird's Nests Found: {count}")
+                return {
+                    "source": "misc",
+                    "counter": "birds_nests",
+                    "count": count,
+                }
 
             if is_catalyst_message(normalized):
                 message_timestamp = get_message_timestamp(normalized)
@@ -2572,7 +2657,11 @@ class SerenWatcherGUI:
                 if kind == "match":
                     result = item[1]
                     self.reload_tables()
-                    if result.get("source") == "catalyst":
+                    if result.get("source") == "misc":
+                        self.status_var.set(
+                            f"Bird's Nests Found: {result['count']}"
+                        )
+                    elif result.get("source") == "catalyst":
                         self.status_var.set(
                             f"Logged catalyst: {result['quantity']} x "
                             f"{result['item']}"
